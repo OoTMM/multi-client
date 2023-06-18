@@ -64,6 +64,12 @@ static void writeItemLedger(Game* game, uint8_t playerFrom, uint8_t playerTo, ui
     key |= ((uint64_t)gameId << 24);
     key |= ((uint64_t)playerFrom << 25);
 
+    /* Renewable items need extra considerations */
+    if (flags & (1 << 2))
+    {
+        key |= ((uint64_t)game->entriesCount << 32);
+    }
+
     /* Build the payload */
     memset(payload, 0, sizeof(payload));
     memcpy(payload + 0x00, &playerFrom, 1);
