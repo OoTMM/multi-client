@@ -32,6 +32,9 @@ typedef struct
     int         state;
     int         delay;
     unsigned    nopAcc;
+    unsigned    timeout;
+    int         apiError;
+
     SOCKET      socketApi;
     SOCKET      socketServer;
 

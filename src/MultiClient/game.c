@@ -3,6 +3,46 @@
 #define SERVER_HOST     "multi.ootmm.com"
 #define SERVER_PORT     13248
 
+static void gameServerClose(Game* game)
+{
+    if (game->socketServer != INVALID_SOCKET)
+    {
+        closesocket(game->socketServer);
+        game->socketServer = INVALID_SOCKET;
+    }
+
+    game->timeout = 0;
+    game->txBufferPos = 0;
+    game->rxBufferSize = 0;
+}
+
+static void gameClose(Game* game)
+{
+    game->valid = 0;
+    if (game->socketServer)
+    {
+        closesocket(game->socketServer);
+        game->socketServer = INVALID_SOCKET;
+    }
+
+    if (game->socketApi)
+    {
+        closesocket(game->socketApi);
+        game->socketApi = INVALID_SOCKET;
+    }
+
+    free(game->txBuffer);
+    free(game->rxBuffer);
+    free(game->entries);
+}
+
+static void gameServerReconnect(Game* game)
+{
+    printf("Disconnected from server, reconnecting...\n");
+    gameServerClose(game);
+    game->state = STATE_CONNECT;
+}
+
 void gameInit(Game* game, SOCKET sock)
 {
     /* Set initial values */
@@ -10,6 +50,8 @@ void gameInit(Game* game, SOCKET sock)
     game->state = STATE_INIT;
     game->delay = 0;
     game->nopAcc = 0;
+    game->timeout = 0;
+    game->apiError = 0;
     game->socketApi = sock;
     game->socketServer = INVALID_SOCKET;
 
@@ -41,8 +83,12 @@ static void gameLoadApiData(Game* game)
     uuidAddr = protocolRead32(game, game->apiNetAddr + 0x00);
     for (int i = 0; i < 16; ++i)
         game->uuid[i] = protocolRead8(game, uuidAddr + i);
-    gameLoadLedger(game);
-    game->state = STATE_CONNECT;
+
+    if (!game->apiError)
+    {
+        gameLoadLedger(game);
+        game->state = STATE_CONNECT;
+    }
 }
 
 static void writeLedger(Game* game, uint64_t key, const void* extra, uint8_t extraSize)
@@ -101,6 +147,9 @@ static void gameApiItemOut(Game* game)
     gi = protocolRead16(game, itemBase + 0x06);
     flags = protocolRead16(game, itemBase + 0x08);
 
+    if (game->apiError)
+        return;
+
     printf("ITEM OUT - FROM: %d, TO: %d, GAME: %d, KEY: %04X, GI: %04X, FLAGS: %04X\n", playerFrom, playerTo, gameId, key, gi, flags);
 
     /* Write */
@@ -122,8 +171,10 @@ static void gameApiApplyLedger(Game* game)
         return;
     if (entryId >= game->entriesCount)
         return;
+    if (game->apiError)
+        return;
 
-    /* APply the ledger entry */
+    /* Apply the ledger entry */
     printf("LEDGER APPLY #%d\n", entryId);
     fe = game->entries + entryId;
     protocolWrite8(game, game->apiNetAddr + 0x18, 0x01);
@@ -149,12 +200,15 @@ static void gameApiTick(Game* game)
     if (game->state == STATE_READY)
     {
         gameOpOut = protocolRead8(game, game->apiNetAddr + 0x08);
+        gameOpIn = protocolRead8(game, game->apiNetAddr + 0x18);
+        if (game->apiError)
+            return;
+
         if (gameOpOut == 0x02)
         {
             gameApiItemOut(game);
         }
 
-        gameOpIn = protocolRead8(game, game->apiNetAddr + 0x18);
         if (gameOpIn == 0x00)
         {
             gameApiApplyLedger(game);
@@ -169,9 +223,15 @@ static int gameProcessInputRx(Game* game, uint32_t size)
     while (game->rxBufferSize < size)
     {
         ret = recv(game->socketServer, game->rxBuffer + game->rxBufferSize, size - game->rxBufferSize, 0);
-        if (ret <= 0)
+        if (ret == 0)
+        {
+            gameServerReconnect(game);
+            return 0;
+        }
+        if (ret < 0)
             return 0;
         game->rxBufferSize += ret;
+        game->timeout = 0;
     }
 
     //printf("DATA: ");
@@ -257,8 +317,6 @@ static void gameProcessTransfer(Game* game)
         {
             game->txBufferPos = 0;
             game->txBufferSize = 0;
-            if (game->state == STATE_JOIN)
-                game->state = STATE_READY;
             return;
         }
 
@@ -277,10 +335,16 @@ static void gameServerJoin(Game* game)
     char buf[20];
     uint32_t ledgerBase;
 
-    ledgerBase = 0;
+    ledgerBase = game->entriesCount;
     memcpy(buf, game->uuid, 16);
     memcpy(buf + 16, &ledgerBase, 4);
-    gameTransfer(game, buf, 20);
+    if (send(game->socketServer, buf, 20, 0) != 20)
+    {
+        printf("Unable to send join message\n");
+        gameServerReconnect(game);
+        return;
+    }
+    game->state = STATE_READY;
 }
 
 static void gameServerConnect(Game* game)
@@ -373,9 +437,19 @@ static void gameServerConnect(Game* game)
 
 static void gameServerTick(Game* game)
 {
+    if (game->apiError)
+        return;
+
     if (game->delay)
     {
         --game->delay;
+        return;
+    }
+
+    game->timeout++;
+    if (game->timeout >= 1500)
+    {
+        gameServerReconnect(game);
         return;
     }
 
@@ -387,7 +461,6 @@ static void gameServerTick(Game* game)
         gameServerConnect(game);
         break;
     case STATE_JOIN:
-        gameProcessTransfer(game);
         break;
     case STATE_READY:
         if (game->txBufferSize == 0 && game->nopAcc >= 100)
@@ -411,6 +484,11 @@ void gameTick(Game* game)
         apiContextUnlock(game);
     }
     gameServerTick(game);
+    if (game->apiError)
+    {
+        printf("Game disconnected\n");
+        gameClose(game);
+    }
 }
 
 void gameTransfer(Game* game, const void* data, uint32_t size)
