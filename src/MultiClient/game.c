@@ -99,31 +99,54 @@ static void writeLedger(Game* game, uint64_t key, const void* extra, uint8_t ext
     gameTransfer(game, extra, extraSize);
 }
 
-static void writeItemLedger(Game* game, uint8_t playerFrom, uint8_t playerTo, uint8_t gameId, uint16_t k, uint16_t gi, uint16_t flags)
+static uint64_t crc64(const void* data, size_t size)
+{
+    uint64_t crc;
+    crc = 0;
+    for (size_t i = 0; i < size; ++i)
+    {
+        crc ^= ((uint64_t)((uint8_t*)data)[i] << 56);
+        for (int j = 0; j < 8; ++j)
+        {
+            if (crc & 0x8000000000000000)
+                crc = (crc << 1) ^ 0x42f0e1eba9ea3693;
+            else
+                crc <<= 1;
+        }
+    }
+
+    return crc;
+}
+
+static uint64_t itemKey(uint32_t checkKey, uint8_t gameId, uint8_t playerFrom, uint32_t entriesCount)
+{
+    char buffer[0x10];
+
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer + 0x00, &checkKey, 4);
+    memcpy(buffer + 0x04, &gameId, 1);
+    memcpy(buffer + 0x05, &playerFrom, 1);
+    memcpy(buffer + 0x06, &entriesCount, 4);
+
+    return crc64(buffer, sizeof(buffer));
+}
+
+static void writeItemLedger(Game* game, uint8_t playerFrom, uint8_t playerTo, uint8_t gameId, uint32_t k, uint16_t gi, uint16_t flags)
 {
     uint64_t key;
-    char payload[16];
+    char payload[0x10];
 
     /* Build the key */
-    key = 0x01;
-    key |= ((uint64_t)k << 8);
-    key |= ((uint64_t)gameId << 24);
-    key |= ((uint64_t)playerFrom << 25);
-
-    /* Renewable items need extra considerations */
-    if (flags & (1 << 2))
-    {
-        key |= ((uint64_t)game->entriesCount << 32);
-    }
+    key = itemKey(k, gameId, playerFrom, (flags & (1 << 2)) ? game->entriesCount : 0xffffffff);
 
     /* Build the payload */
     memset(payload, 0, sizeof(payload));
     memcpy(payload + 0x00, &playerFrom, 1);
     memcpy(payload + 0x01, &playerTo, 1);
     memcpy(payload + 0x02, &gameId, 1);
-    memcpy(payload + 0x04, &k, 2);
-    memcpy(payload + 0x06, &gi, 2);
-    memcpy(payload + 0x08, &flags, 2);
+    memcpy(payload + 0x04, &k, 4);
+    memcpy(payload + 0x08, &gi, 2);
+    memcpy(payload + 0x0a, &flags, 2);
 
     /* Write the ledger */
     writeLedger(game, key, payload, sizeof(payload));
@@ -135,7 +158,7 @@ static void gameApiItemOut(Game* game)
     uint8_t playerFrom;
     uint8_t playerTo;
     uint8_t gameId;
-    uint16_t key;
+    uint32_t key;
     uint16_t gi;
     uint16_t flags;
 
@@ -143,9 +166,9 @@ static void gameApiItemOut(Game* game)
     playerFrom = protocolRead8(game, itemBase + 0x00);
     playerTo = protocolRead8(game, itemBase + 0x01);
     gameId = protocolRead8(game, itemBase + 0x02);
-    key = protocolRead16(game, itemBase + 0x04);
-    gi = protocolRead16(game, itemBase + 0x06);
-    flags = protocolRead16(game, itemBase + 0x08);
+    key = protocolRead32(game, itemBase + 0x04);
+    gi = protocolRead16(game, itemBase + 0x08);
+    flags = protocolRead16(game, itemBase + 0x0a);
 
     if (game->apiError)
         return;
@@ -164,6 +187,7 @@ static void gameApiApplyLedger(Game* game)
     uint32_t entryId;
     uint32_t cmdBase;
     uint16_t tmp16;
+    uint32_t tmp32;
     LedgerFullEntry* fe;
 
     entryId = protocolRead32(game, game->apiNetAddr + 0x04);
@@ -182,12 +206,12 @@ static void gameApiApplyLedger(Game* game)
     protocolWrite8(game, cmdBase + 0x00, fe->data[0x00]); // playerFrom
     protocolWrite8(game, cmdBase + 0x01, fe->data[0x01]); // playerTo
     protocolWrite8(game, cmdBase + 0x02, fe->data[0x02]); // gameId
-    memcpy(&tmp16, fe->data + 0x04, 2);
-    protocolWrite16(game, cmdBase + 0x04, tmp16); // key
+    memcpy(&tmp32, fe->data + 0x04, 4);
+    protocolWrite32(game, cmdBase + 0x04, tmp32); // key
     memcpy(&tmp16, fe->data + 0x06, 2);
-    protocolWrite16(game, cmdBase + 0x06, tmp16); // gi
+    protocolWrite16(game, cmdBase + 0x08, tmp16); // gi
     memcpy(&tmp16, fe->data + 0x08, 2);
-    protocolWrite16(game, cmdBase + 0x08, tmp16); // flags
+    protocolWrite16(game, cmdBase + 0x0a, tmp16); // flags
 }
 
 static void gameApiTick(Game* game)
