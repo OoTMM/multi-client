@@ -208,9 +208,9 @@ static void gameApiApplyLedger(Game* game)
     protocolWrite8(game, cmdBase + 0x02, fe->data[0x02]); // gameId
     memcpy(&tmp32, fe->data + 0x04, 4);
     protocolWrite32(game, cmdBase + 0x04, tmp32); // key
-    memcpy(&tmp16, fe->data + 0x06, 2);
-    protocolWrite16(game, cmdBase + 0x08, tmp16); // gi
     memcpy(&tmp16, fe->data + 0x08, 2);
+    protocolWrite16(game, cmdBase + 0x08, tmp16); // gi
+    memcpy(&tmp16, fe->data + 0x0a, 2);
     protocolWrite16(game, cmdBase + 0x0a, tmp16); // flags
 }
 
