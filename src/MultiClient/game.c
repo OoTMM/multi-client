@@ -1,8 +1,5 @@
 #include "multi.h"
 
-#define SERVER_HOST     "multi.ootmm.com"
-#define SERVER_PORT     13248
-
 static void gameServerClose(Game* game)
 {
     if (game->socketServer != INVALID_SOCKET)
@@ -371,7 +368,7 @@ static void gameServerJoin(Game* game)
     game->state = STATE_READY;
 }
 
-static void gameServerConnect(Game* game)
+static void gameServerConnect(App* app, Game* game)
 {
     struct addrinfo hints;
     struct addrinfo* result;
@@ -385,9 +382,9 @@ static void gameServerConnect(Game* game)
     hints.ai_family     = AF_UNSPEC;
     hints.ai_socktype   = SOCK_STREAM;
     hints.ai_protocol   = IPPROTO_TCP;
-    snprintf(buf, sizeof(buf), "%d", SERVER_PORT);
+    snprintf(buf, sizeof(buf), "%d", app->serverPort);
 
-    ret = getaddrinfo(SERVER_HOST, buf, &hints, &result);
+    ret = getaddrinfo(app->serverHost, buf, &hints, &result);
     if (ret != 0)
     {
         printf("getaddrinfo failed: %d\n", ret);
@@ -448,18 +445,18 @@ static void gameServerConnect(Game* game)
 
     if (game->socketServer == INVALID_SOCKET)
     {
-        printf("Unable to connect to server at %s:%d\n", SERVER_HOST, SERVER_PORT);
+        printf("Unable to connect to server at %s:%d\n", app->serverHost, app->serverPort);
         game->delay = 100;
         return;
     }
 
     /* Log */
-    printf("Connected to server at %s:%d\n", SERVER_HOST, SERVER_PORT);
+    printf("Connected to server at %s:%d\n", app->serverHost, app->serverPort);
     game->state = STATE_JOIN;
     gameServerJoin(game);
 }
 
-static void gameServerTick(Game* game)
+static void gameServerTick(App* app, Game* game)
 {
     if (game->apiError)
         return;
@@ -482,7 +479,7 @@ static void gameServerTick(Game* game)
     case STATE_INIT:
         break;
     case STATE_CONNECT:
-        gameServerConnect(game);
+        gameServerConnect(app, game);
         break;
     case STATE_JOIN:
         break;
@@ -500,14 +497,14 @@ static void gameServerTick(Game* game)
     }
 }
 
-void gameTick(Game* game)
+void gameTick(App* app, Game* game)
 {
     if (apiContextLock(game))
     {
         gameApiTick(game);
         apiContextUnlock(game);
     }
-    gameServerTick(game);
+    gameServerTick(app, game);
     if (game->apiError)
     {
         printf("Game disconnected\n");

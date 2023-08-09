@@ -59,18 +59,20 @@ Game;
 
 typedef struct
 {
-    SOCKET socket;
-    Game   games[MAX_GAMES];
+    const char* serverHost;
+    uint16_t    serverPort;
+    SOCKET      socket;
+    Game        games[MAX_GAMES];
 }
 App;
 
 int appInit(App* app);
 int appListen(App* app, const char* host, uint16_t port);
-int appRun(App* app);
+int appRun(App* app, const char* host, uint16_t port);
 int appQuit(App* app);
 
 void gameInit(Game* g, SOCKET s);
-void gameTick(Game* game);
+void gameTick(App* app, Game* game);
 void gameTransfer(Game* game, const void* data, uint32_t size);
 
 uint8_t     protocolRead8(Game* game, uint32_t addr);

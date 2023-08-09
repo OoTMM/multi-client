@@ -149,8 +149,12 @@ static void sigHandler(int signum)
     sSignaled = 1;
 }
 
-int appRun(App* app)
+int appRun(App* app, const char *host, uint16_t port)
 {
+    /* Set host and port */
+    app->serverHost = host;
+    app->serverPort = port;
+
     /* Set signal handlers */
     signal(SIGINT, sigHandler);
     signal(SIGTERM, sigHandler);
@@ -167,7 +171,7 @@ int appRun(App* app)
             g = &app->games[i];
             if (!g->valid)
                 continue;
-            gameTick(g);
+            gameTick(app, g);
         }
         Sleep(10);
     }
