@@ -21,7 +21,7 @@ int main(int argc, char** argv)
     if (argc > 1)
         host = argv[1];
     if (argc > 2)
-        port = atoi(argv[2]);
+        port = (uint16_t)atoi(argv[2]);
 
     if (appInit(&app))
         return 1;

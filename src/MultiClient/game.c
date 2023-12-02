@@ -70,7 +70,7 @@ void gameInit(Game* game, SOCKET sock)
 
 static void gameLoadLedger(Game* game)
 {
-
+    (void)game;
 }
 
 static void gameLoadApiData(Game* game)
