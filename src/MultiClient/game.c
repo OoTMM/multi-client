@@ -9,8 +9,9 @@ static void gameServerClose(Game* game)
     }
 
     game->timeout = 0;
-    game->txBufferPos = 0;
     game->rxBufferSize = 0;
+
+    netBufClear(&game->tx);
 }
 
 static void gameClose(Game* game)
@@ -28,7 +29,7 @@ static void gameClose(Game* game)
         game->socketApi = INVALID_SOCKET;
     }
 
-    free(game->txBuffer);
+    netBufFree(&game->tx);
     free(game->rxBuffer);
     free(game->entries);
 }
@@ -52,10 +53,7 @@ void gameInit(Game* game, SOCKET sock)
     game->socketApi = sock;
     game->socketServer = INVALID_SOCKET;
 
-    game->txBufferCapacity = 4096;
-    game->txBuffer = malloc(game->txBufferCapacity);
-    game->txBufferSize = 0;
-    game->txBufferPos = 0;
+    netBufInit(&game->tx);
 
     game->rxBuffer = malloc(256);
     game->rxBufferSize = 0;
@@ -90,10 +88,10 @@ static void gameLoadApiData(Game* game)
 
 static void writeLedger(Game* game, uint64_t key, const void* extra, uint8_t extraSize)
 {
-    gameTransfer(game, "\x01", 1);
-    gameTransfer(game, &key, 8);
-    gameTransfer(game, &extraSize, 1);
-    gameTransfer(game, extra, extraSize);
+    netBufAppend(&game->tx, "\x01", 1);
+    netBufAppend(&game->tx, &key, 8);
+    netBufAppend(&game->tx, &extraSize, 1);
+    netBufAppend(&game->tx, extra, extraSize);
 }
 
 static uint64_t crc64(const void* data, size_t size)
@@ -328,29 +326,6 @@ static void gameProcessInput(Game* game)
     }
 }
 
-static void gameProcessTransfer(Game* game)
-{
-    int ret;
-
-    for (;;)
-    {
-        if (game->txBufferPos == game->txBufferSize)
-        {
-            game->txBufferPos = 0;
-            game->txBufferSize = 0;
-            return;
-        }
-
-        ret = send(game->socketServer, game->txBuffer + game->txBufferPos, game->txBufferSize - game->txBufferPos, 0);
-        if (ret > 0)
-        {
-            game->txBufferPos += ret;
-        }
-        else
-            break;
-    }
-}
-
 static void gameServerJoin(Game* game)
 {
     char buf[20];
@@ -484,14 +459,14 @@ static void gameServerTick(App* app, Game* game)
     case STATE_JOIN:
         break;
     case STATE_READY:
-        if (game->txBufferSize == 0 && game->nopAcc >= 100)
+        if (netBufIsEmpty(&game->tx) && game->nopAcc >= 100)
         {
             game->nopAcc = 0;
-            gameTransfer(game, "\x00", 1);
+            netBufAppend(&game->tx, "\x00", 1);
         }
         else
             ++game->nopAcc;
-        gameProcessTransfer(game);
+        netBufTransfer(game->socketServer, &game->tx);
         gameProcessInput(game);
         break;
     }
@@ -510,15 +485,4 @@ void gameTick(App* app, Game* game)
         printf("Game disconnected\n");
         gameClose(game);
     }
-}
-
-void gameTransfer(Game* game, const void* data, uint32_t size)
-{
-    while (game->txBufferSize + size > game->txBufferCapacity)
-    {
-        game->txBufferCapacity *= 2;
-        game->txBuffer = realloc(game->txBuffer, game->txBufferCapacity);
-    }
-    memcpy(game->txBuffer + game->txBufferSize, data, size);
-    game->txBufferSize += size;
 }
