@@ -28,6 +28,31 @@ LedgerFullEntry;
 
 typedef struct
 {
+    LedgerFullEntry    entry;
+    int                ttl;
+}
+SendQueueEntry;
+
+typedef struct
+{
+    FILE*               file;
+    uint32_t            size;
+    uint32_t            capacity;
+    SendQueueEntry*     data;
+}
+SendQueue;
+
+typedef struct
+{
+    char*       data;
+    uint32_t    capacity;
+    uint32_t    size;
+    uint32_t    pos;
+}
+NetBuffer;
+
+typedef struct
+{
     int         valid;
     int         state;
     int         delay;
@@ -43,10 +68,7 @@ typedef struct
     uint32_t    ledgerBaseLocal;
     uint32_t    ledgerBaseGame;
 
-    char*       txBuffer;
-    uint32_t    txBufferCapacity;
-    uint32_t    txBufferSize;
-    uint32_t    txBufferPos;
+    NetBuffer   tx;
 
     char*       rxBuffer;
     uint32_t    rxBufferSize;
@@ -54,6 +76,8 @@ typedef struct
     LedgerFullEntry* entries;
     uint32_t         entriesCount;
     uint32_t         entriesCapacity;
+
+    SendQueue   sendq;
 }
 Game;
 
@@ -73,7 +97,6 @@ int appQuit(App* app);
 
 void gameInit(Game* g, SOCKET s);
 void gameTick(App* app, Game* game);
-void gameTransfer(Game* game, const void* data, uint32_t size);
 
 uint8_t     protocolRead8(Game* game, uint32_t addr);
 uint16_t    protocolRead16(Game* game, uint32_t addr);
@@ -84,5 +107,20 @@ void        protocolWrite32(Game* game, uint32_t addr, uint32_t value);
 
 int         apiContextLock(Game* game);
 void        apiContextUnlock(Game* game);
+
+void        sendqInit(SendQueue* q);
+int         sendqOpen(SendQueue* q, const uint8_t* uuid);
+void        sendqClose(SendQueue* q);
+int         sendqAppend(SendQueue* sq, const LedgerFullEntry* entry);
+void        sendqTick(SendQueue* q, NetBuffer* nb);
+void        sendqAck(SendQueue* q, uint64_t key);
+
+int         netBufInit(NetBuffer* nb);
+void        netBufFree(NetBuffer* nb);
+void        netBufClear(NetBuffer* nb);
+int         netBufTransfer(SOCKET sock, NetBuffer* nb);
+int         netBufIsEmpty(const NetBuffer* nb);
+void*       netBufReserve(NetBuffer* nb, uint32_t size);
+int         netBufAppend(NetBuffer* nb, const void* data, uint32_t size);
 
 #endif
