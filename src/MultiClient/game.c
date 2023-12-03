@@ -32,6 +32,7 @@ static void gameClose(Game* game)
     netBufFree(&game->tx);
     free(game->rxBuffer);
     free(game->entries);
+    sendqClose(&game->sendq);
 }
 
 static void gameServerReconnect(Game* game)
@@ -62,6 +63,8 @@ void gameInit(Game* game, SOCKET sock)
     game->entriesCapacity = 256;
     game->entries = malloc(game->entriesCapacity * sizeof(LedgerFullEntry));
 
+    sendqInit(&game->sendq);
+
     /* Log */
     printf("Game created\n");
 }
@@ -81,17 +84,13 @@ static void gameLoadApiData(Game* game)
 
     if (!game->apiError)
     {
+        /* Load the send queue */
+        sendqOpen(&game->sendq, game->uuid);
+
+        /* Load the ledger */
         gameLoadLedger(game);
         game->state = STATE_CONNECT;
     }
-}
-
-static void writeLedger(Game* game, uint64_t key, const void* extra, uint8_t extraSize)
-{
-    netBufAppend(&game->tx, "\x01", 1);
-    netBufAppend(&game->tx, &key, 8);
-    netBufAppend(&game->tx, &extraSize, 1);
-    netBufAppend(&game->tx, extra, extraSize);
 }
 
 static uint64_t crc64(const void* data, size_t size)
@@ -126,25 +125,28 @@ static uint64_t itemKey(uint32_t checkKey, uint8_t gameId, uint8_t playerFrom, u
     return crc64(buffer, sizeof(buffer));
 }
 
-static void writeItemLedger(Game* game, uint8_t playerFrom, uint8_t playerTo, uint8_t gameId, uint32_t k, uint16_t gi, uint16_t flags)
+static int writeItemLedger(Game* game, uint8_t playerFrom, uint8_t playerTo, uint8_t gameId, uint32_t k, uint16_t gi, uint16_t flags)
 {
-    uint64_t key;
-    char payload[0x10];
+    LedgerFullEntry e;
+
+    memset(&e, 0, sizeof(e));
 
     /* Build the key */
-    key = itemKey(k, gameId, playerFrom, (flags & (1 << 2)) ? game->entriesCount : 0xffffffff);
+    e.key = itemKey(k, gameId, playerFrom, (flags & (1 << 2)) ? game->entriesCount : 0xffffffff);
 
     /* Build the payload */
-    memset(payload, 0, sizeof(payload));
-    memcpy(payload + 0x00, &playerFrom, 1);
-    memcpy(payload + 0x01, &playerTo, 1);
-    memcpy(payload + 0x02, &gameId, 1);
-    memcpy(payload + 0x04, &k, 4);
-    memcpy(payload + 0x08, &gi, 2);
-    memcpy(payload + 0x0a, &flags, 2);
+    e.size = 0x10;
+    memcpy(e.data + 0x00, &playerFrom, 1);
+    memcpy(e.data + 0x01, &playerTo, 1);
+    memcpy(e.data + 0x02, &gameId, 1);
+    memcpy(e.data + 0x04, &k, 4);
+    memcpy(e.data + 0x08, &gi, 2);
+    memcpy(e.data + 0x0a, &flags, 2);
 
     /* Write the ledger */
-    writeLedger(game, key, payload, sizeof(payload));
+    if (sendqAppend(&game->sendq, &e))
+        return 0;
+    return 1;
 }
 
 static void gameApiItemOut(Game* game)
@@ -170,11 +172,11 @@ static void gameApiItemOut(Game* game)
 
     printf("ITEM OUT - FROM: %d, TO: %d, GAME: %d, KEY: %04X, GI: %04X, FLAGS: %04X\n", playerFrom, playerTo, gameId, key, gi, flags);
 
-    /* Write */
-    writeItemLedger(game, playerFrom, playerTo, gameId, key, gi, flags);
-
-    /* Mark the item as sent */
-    protocolWrite8(game, game->apiNetAddr + 0x08, 0x00);
+    /* Write and flag as sent */
+    if (writeItemLedger(game, playerFrom, playerTo, gameId, key, gi, flags))
+    {
+        protocolWrite8(game, game->apiNetAddr + 0x08, 0x00);
+    }
 }
 
 static void gameApiApplyLedger(Game* game)
@@ -291,6 +293,9 @@ static int gameProcessRxLedgerEntry(Game* game)
     }
     memcpy(game->entries + game->entriesCount, &fe, sizeof(LedgerFullEntry));
     game->entriesCount++;
+
+    /* Ack */
+    sendqAck(&game->sendq, fe.key);
 
     return 1;
 }
@@ -459,6 +464,7 @@ static void gameServerTick(App* app, Game* game)
     case STATE_JOIN:
         break;
     case STATE_READY:
+        /* NOP reqs */
         if (netBufIsEmpty(&game->tx) && game->nopAcc >= 100)
         {
             game->nopAcc = 0;
@@ -466,6 +472,7 @@ static void gameServerTick(App* app, Game* game)
         }
         else
             ++game->nopAcc;
+        sendqTick(&game->sendq, &game->tx);
         netBufTransfer(game->socketServer, &game->tx);
         gameProcessInput(game);
         break;

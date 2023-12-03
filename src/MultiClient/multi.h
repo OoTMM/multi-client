@@ -28,11 +28,17 @@ LedgerFullEntry;
 
 typedef struct
 {
+    LedgerFullEntry    entry;
+    int                ttl;
+}
+SendQueueEntry;
+
+typedef struct
+{
     FILE*               file;
-    int                 lastSend;
     uint32_t            size;
     uint32_t            capacity;
-    LedgerFullEntry*    data;
+    SendQueueEntry*     data;
 }
 SendQueue;
 
@@ -70,6 +76,8 @@ typedef struct
     LedgerFullEntry* entries;
     uint32_t         entriesCount;
     uint32_t         entriesCapacity;
+
+    SendQueue   sendq;
 }
 Game;
 
@@ -103,12 +111,16 @@ void        apiContextUnlock(Game* game);
 void        sendqInit(SendQueue* q);
 int         sendqOpen(SendQueue* q, const uint8_t* uuid);
 void        sendqClose(SendQueue* q);
+int         sendqAppend(SendQueue* sq, const LedgerFullEntry* entry);
+void        sendqTick(SendQueue* q, NetBuffer* nb);
+void        sendqAck(SendQueue* q, uint64_t key);
 
 int         netBufInit(NetBuffer* nb);
 void        netBufFree(NetBuffer* nb);
 void        netBufClear(NetBuffer* nb);
 int         netBufTransfer(SOCKET sock, NetBuffer* nb);
 int         netBufIsEmpty(const NetBuffer* nb);
+void*       netBufReserve(NetBuffer* nb, uint32_t size);
 int         netBufAppend(NetBuffer* nb, const void* data, uint32_t size);
 
 #endif

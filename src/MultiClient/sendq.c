@@ -1,10 +1,12 @@
 #include "multi.h"
 #include <direct.h>
+#include <io.h>
+
+#define SQ_TTL 2000
 
 void sendqInit(SendQueue* q)
 {
     q->file = NULL;
-    q->lastSend = 0;
     q->size = 0;
     q->capacity = 8;
     q->data = NULL;
@@ -14,6 +16,9 @@ int sendqOpen(SendQueue* q, const uint8_t* uuid)
 {
     int count;
     char buffer[MAX_PATH];
+
+    /* Close previous send queue */
+    sendqClose(q);
 
     _mkdir("data");
     snprintf(buffer, MAX_PATH, "data/%02x%02x%02x%02x%02x%02x%02x%02x"
@@ -42,20 +47,139 @@ int sendqOpen(SendQueue* q, const uint8_t* uuid)
     /* Allocate the buffer */
     q->size = count;
     q->capacity = count + 8;
-    q->data = (LedgerFullEntry*)malloc(q->capacity * sizeof(LedgerFullEntry));
+    q->data = malloc(q->capacity * sizeof(SendQueueEntry));
 
     /* Read the entries */
-    if (count)
-        fread(q->data, sizeof(LedgerFullEntry), count, q->file);
+    for (int i = 0; i < count; ++i)
+    {
+        fread(&q->data[i].entry, sizeof(LedgerFullEntry), 1, q->file);
+        q->data[i].ttl = 0;
+    }
 
     return 0;
 }
 
 void sendqClose(SendQueue* q)
 {
-    fclose(q->file);
+    if (q->file)
+        fclose(q->file);
     q->file = NULL;
     q->size = 0;
-    q->lastSend = 0;
     free(q->data);
+}
+
+static int sendqLocate(const SendQueue* sq, uint64_t key)
+{
+    for (uint32_t i = 0; i < sq->size; ++i)
+    {
+        if (sq->data[i].entry.key == key)
+            return (int)i;
+    }
+
+    return -1;
+}
+
+static int sendqWrite(SendQueue* sq, const LedgerFullEntry* entry)
+{
+    int id;
+    uint32_t newCapacity;
+    void* newData;
+
+    /* No need to duplicate an entry */
+    id = sendqLocate(sq, entry->key);
+    if (id >= 0)
+        return id;
+
+    /* Ensure there is enough space */
+    if (sq->size == sq->capacity)
+    {
+        newCapacity = sq->capacity * 2;
+        newData = realloc(sq->data, newCapacity * sizeof(SendQueueEntry));
+        if (!newData)
+            return -1;
+        sq->data = newData;
+        sq->capacity = newCapacity;
+    }
+
+    /* Write in-memory */
+    id = (int)sq->size;
+    memcpy(&sq->data[id].entry, entry, sizeof(LedgerFullEntry));
+    sq->data[id].ttl = 0;
+    ++sq->size;
+
+    /* Write to disk */
+    fseek(sq->file, id * sizeof(LedgerFullEntry), SEEK_SET);
+    fwrite(entry, sizeof(LedgerFullEntry), 1, sq->file);
+    fflush(sq->file);
+
+    return id;
+}
+
+static int sendqTransfer(NetBuffer* nb, const LedgerFullEntry* entry)
+{
+    char* bufDst;
+
+    /* Write to the net buffer */
+    bufDst = netBufReserve(nb, 1 + 8 + 1 + entry->size);
+    if (!bufDst)
+        return -1;
+    memcpy(bufDst + 0, "\x01", 1);
+    memcpy(bufDst + 1, &entry->key, 8);
+    memcpy(bufDst + 9, &entry->size, 1);
+    memcpy(bufDst + 10, entry->data, entry->size);
+
+    return 0;
+}
+
+int sendqAppend(SendQueue* sq, const LedgerFullEntry* entry)
+{
+    int sqId;
+
+    /* Write to the send queue */
+    sqId = sendqWrite(sq, entry);
+    if (sqId < 0)
+        return -1;
+
+    return 0;
+}
+
+void sendqTick(SendQueue* sq, NetBuffer* nb)
+{
+    SendQueueEntry* sqe;
+
+    for (uint32_t i = 0; i < sq->size; ++i)
+    {
+        sqe = &sq->data[i];
+        if (sqe->ttl)
+        {
+            sqe->ttl -= 1;
+            continue;
+        }
+        if (!sendqTransfer(nb, &sqe->entry))
+            sqe->ttl = SQ_TTL;
+    }
+}
+
+void sendqAck(SendQueue* q, uint64_t key)
+{
+    int id;
+
+    id = sendqLocate(q, key);
+    if (id < 0)
+        return;
+
+    printf("ACK %016llx\n", key);
+
+    /* Check if it's not the last element */
+    if (id != (int)q->size - 1)
+    {
+        memcpy(&q->data[id], &q->data[q->size - 1], sizeof(SendQueueEntry));
+        fseek(q->file, id * sizeof(LedgerFullEntry), SEEK_SET);
+        fwrite(&q->data[id].entry, sizeof(LedgerFullEntry), 1, q->file);
+        fflush(q->file);
+    }
+
+    /* Truncate the file */
+    q->size--;
+    _chsize_s(_fileno(q->file), q->size * sizeof(LedgerFullEntry));
 }

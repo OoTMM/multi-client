@@ -51,7 +51,7 @@ int netBufIsEmpty(const NetBuffer* nb)
     return nb->size == 0;
 }
 
-int netBufAppend(NetBuffer* nb, const void* data, uint32_t size)
+void* netBufReserve(NetBuffer* nb, uint32_t size)
 {
     uint32_t newCapacity;
     uint32_t newSize;
@@ -67,7 +67,7 @@ int netBufAppend(NetBuffer* nb, const void* data, uint32_t size)
 
         newData = (char*)malloc(newCapacity);
         if (!newData)
-            return -1;
+            return NULL;
 
         memcpy(newData, nb->data, nb->size);
         free(nb->data);
@@ -75,8 +75,19 @@ int netBufAppend(NetBuffer* nb, const void* data, uint32_t size)
         nb->capacity = newCapacity;
     }
 
-    /* Append the data */
-    memcpy(nb->data + nb->size, data, size);
+    /* Return the pointer */
+    newData = nb->data + nb->size;
     nb->size = newSize;
+    return newData;
+}
+
+int netBufAppend(NetBuffer* nb, const void* data, uint32_t size)
+{
+    void* dst;
+
+    dst = netBufReserve(nb, size);
+    if (!dst)
+        return -1;
+    memcpy(dst, data, size);
     return 0;
 }
