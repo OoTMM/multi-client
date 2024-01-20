@@ -7,6 +7,12 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <windows.h>
+
+    static inline int sockasync(SOCKET sock, int enable)
+    {
+        u_long mode = enable ? 1 : 0;
+        return ioctlsocket(sock, FIONBIO, &mode);
+    }
 #else
     typedef int SOCKET;
     #include <unistd.h>
@@ -34,6 +40,18 @@
     #define _chsize_s(fd, size)     ftruncate(fd, size)
     #define MAX_PATH                16384
     #define TIMEVAL                 struct timeval
+
+    static inline int sockasync(SOCKET sock, int enable)
+    {
+        int mode = fcntl(sock, F_GETFL, 0);
+        if (mode == -1)
+            return -1;
+        if (enable)
+            mode |= O_NONBLOCK;
+        else
+            mode &= ~O_NONBLOCK;
+        return fcntl(sock, F_SETFL, mode);
+    }
 #endif
 
 #include <stdio.h>

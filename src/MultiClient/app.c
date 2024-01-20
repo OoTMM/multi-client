@@ -73,13 +73,8 @@ int appListen(App* app, const char* host, uint16_t port)
     }
 
     /* Set the socket to non-blocking */
-#ifdef _WIN32
-    u_long mode = 1;
-    ret = ioctlsocket(sock, FIONBIO, &mode);
-#else
-    int mode = fcntl(sock, F_GETFL, 0);
-    ret = fcntl(sock, F_SETFL, mode | O_NONBLOCK);
-#endif
+    ret = sockasync(sock, 1);
+
     if (ret == SOCKET_ERROR)
     {
         fprintf(stderr, "Unable to set socket to non-blocking\n");
@@ -103,13 +98,7 @@ static void appAccept(App* app)
         return;
 
     /* Make the socket blocking */
-#ifdef _WIN32
-    mode = 0;
-    ioctlsocket(sock, FIONBIO, &mode);
-#else
-    mode = fcntl(sock, F_GETFL, 0);
-    fcntl(sock, F_SETFL, mode & ~O_NONBLOCK);
-#endif
+    sockasync(sock, 0);
 
     /* Create game */
     for (int i = 0; i < MAX_GAMES; ++i)
