@@ -1,6 +1,8 @@
 #include "multi.h"
+#ifdef _WIN32
 #include <direct.h>
 #include <io.h>
+#endif
 
 #define SQ_TTL 2000
 

@@ -498,8 +498,13 @@ static void gameServerConnect(App* app, Game* game)
         }
 
         /* Make the socket blocking */
+        #ifdef _WIN32
         mode = 0;
         ioctlsocket(game->socketServer, FIONBIO, &mode);
+        #else
+        mode = fcntl(game->socketServer, F_GETFL, 0);
+        fcntl(game->socketServer, F_SETFL, mode & ~O_NONBLOCK);
+        #endif
 
         /* Send the initial message */
         memcpy(buf, "OOMM2", 5);
@@ -528,8 +533,13 @@ static void gameServerConnect(App* app, Game* game)
         memcpy(&game->clientId, buf + 9, 2);
 
         /* Make the socket non blocking */
+        #ifdef _WIN32
         mode = 1;
         ioctlsocket(game->socketServer, FIONBIO, &mode);
+        #else
+        mode = fcntl(game->socketServer, F_GETFL, 0);
+        fcntl(game->socketServer, F_SETFL, mode | O_NONBLOCK);
+        #endif
 
         break;
     }
