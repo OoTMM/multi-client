@@ -11,12 +11,25 @@
 #include <string.h>
 #include <stdint.h>
 
-#define MAX_GAMES 8
+#define MAX_GAMES   8
+#define VERSION     0x00000200
 
 #define STATE_INIT      0x00
 #define STATE_CONNECT   0x01
 #define STATE_JOIN      0x02
 #define STATE_READY     0x03
+
+#define OP_NONE         0x00
+#define OP_TRANSFER     0x01
+#define OP_MSG          0x02
+
+typedef struct
+{
+    uint8_t     size;
+    uint16_t    clientId;
+    char        data[32];
+}
+NetMsg;
 
 typedef struct
 {
@@ -73,11 +86,13 @@ typedef struct
     char*       rxBuffer;
     uint32_t    rxBufferSize;
 
+    uint16_t         clientId;
     LedgerFullEntry* entries;
     uint32_t         entriesCount;
     uint32_t         entriesCapacity;
 
     SendQueue   sendq;
+    NetMsg      msg[128];
 }
 Game;
 

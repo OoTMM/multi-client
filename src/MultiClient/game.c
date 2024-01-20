@@ -65,6 +65,8 @@ void gameInit(Game* game, SOCKET sock)
 
     sendqInit(&game->sendq);
 
+    memset(&game->msg, 0, sizeof(game->msg));
+
     /* Log */
     printf("Game created\n");
 }
@@ -211,6 +213,69 @@ static void gameApiApplyLedger(Game* game)
     protocolWrite16(game, cmdBase + 0x0a, tmp16); // flags
 }
 
+static int insertMessage(Game* game, NetMsg* msg)
+{
+    uint8_t size;
+    int index;
+
+    index = -1;
+    for (int i = 0; i < 32; ++i)
+    {
+        size = protocolRead8(game, game->apiNetAddr + 0x28 + i);
+        if (size == 0)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if (index < 0)
+        return -1;
+
+    protocolWrite8(game, game->apiNetAddr + 0x28 + index, msg->size);
+    protocolWrite16(game, game->apiNetAddr + 0x68 + index * 2, msg->clientId);
+    for (int i = 0; i < msg->size; ++i)
+        protocolWrite8(game, game->apiNetAddr + 0xa8 + index * 32 + i, msg->data[i]);
+    return 0;
+}
+
+static void gameApiProcessMessagesIn(Game* game)
+{
+    for (int i = 0; i < 128; ++i)
+    {
+        if (game->msg[i].size)
+        {
+            if (insertMessage(game, game->msg + i))
+                return;
+            game->msg[i].size = 0;
+        }
+    }
+}
+
+static void gameApiProcessMessagesOut(Game* game)
+{
+    char data[34];
+    uint8_t size;
+
+    for (int i = 0; i < 32; ++i)
+    {
+        size = protocolRead8(game, game->apiNetAddr + 0x48 + i);
+        if (size)
+        {
+            data[0] = OP_MSG;
+            data[1] = size;
+            for (int j = 0; j < size; ++j)
+                data[j + 2] = protocolRead8(game, game->apiNetAddr + 0xa8 + i * 32 + j);
+
+            /* Send */
+            netBufAppend(&game->tx, data, size + 2);
+
+            /* Clear */
+            protocolWrite8(game, game->apiNetAddr + 0x48 + i, 0x00);
+        }
+    }
+}
+
 static void gameApiTick(Game* game)
 {
     uint8_t gameOpOut;
@@ -220,6 +285,7 @@ static void gameApiTick(Game* game)
         gameLoadApiData(game);
     if (game->state == STATE_READY)
     {
+        /* Handle transfers */
         gameOpOut = protocolRead8(game, game->apiNetAddr + 0x08);
         gameOpIn = protocolRead8(game, game->apiNetAddr + 0x18);
         if (game->apiError)
@@ -234,6 +300,9 @@ static void gameApiTick(Game* game)
         {
             gameApiApplyLedger(game);
         }
+
+        gameApiProcessMessagesOut(game);
+        gameApiProcessMessagesIn(game);
     }
 }
 
@@ -300,6 +369,40 @@ static int gameProcessRxLedgerEntry(Game* game)
     return 1;
 }
 
+static int gameProcessRxMessage(Game* game)
+{
+    uint8_t size;
+    uint16_t clientId;
+    char data[32];
+
+    /* Fetch the header */
+    if (!gameProcessInputRx(game, 4))
+        return 0;
+
+    size = (uint8_t)game->rxBuffer[1];
+    memcpy(&clientId, game->rxBuffer + 2, 2);
+    if (!gameProcessInputRx(game, 4 + size))
+        return 0;
+
+    /* We have a full message entry */
+    memcpy(data, game->rxBuffer + 4, size);
+    game->rxBufferSize = 0;
+
+    /* Store the message */
+    for (int i = 0; i < 128; ++i)
+    {
+        if (game->msg[i].size == 0)
+        {
+            game->msg[i].size = size;
+            game->msg[i].clientId = clientId;
+            memcpy(game->msg[i].data, data, size);
+            break;
+        }
+    }
+
+    return 1;
+}
+
 static void gameProcessInput(Game* game)
 {
     uint8_t op;
@@ -316,11 +419,15 @@ static void gameProcessInput(Game* game)
 
         switch (op)
         {
-        case 0: // NOP
+        case OP_NONE:
             game->rxBufferSize = 0;
             break;
-        case 1:
+        case OP_TRANSFER:
             if (!gameProcessRxLedgerEntry(game))
+                return;
+            break;
+        case OP_MSG:
+            if (!gameProcessRxMessage(game))
                 return;
             break;
         default:
@@ -356,6 +463,7 @@ static void gameServerConnect(App* app, Game* game)
     u_long mode;
     int ret;
     char buf[16];
+    uint32_t tmp32;
 
     /* Resolve the server address and port */
     memset(&hints, 0, sizeof(hints));
@@ -394,7 +502,10 @@ static void gameServerConnect(App* app, Game* game)
         ioctlsocket(game->socketServer, FIONBIO, &mode);
 
         /* Send the initial message */
-        if (send(game->socketServer, "OoTMM", 5, 0) != 5)
+        memcpy(buf, "OOMM2", 5);
+        tmp32 = VERSION;
+        memcpy(buf + 5, &tmp32, 4);
+        if (send(game->socketServer, buf, 9, 0) != 9)
         {
             closesocket(game->socketServer);
             game->socketServer = INVALID_SOCKET;
@@ -402,18 +513,19 @@ static void gameServerConnect(App* app, Game* game)
         }
 
         /* Get the initial reply */
-        if (recv(game->socketServer, buf, 5, 0) != 5)
+        if (recv(game->socketServer, buf, 11, 0) != 11)
         {
             closesocket(game->socketServer);
             game->socketServer = INVALID_SOCKET;
             continue;
         }
-        if (memcmp(buf, "OoTMM", 5))
+        if (memcmp(buf, "OOMM2", 5))
         {
             closesocket(game->socketServer);
             game->socketServer = INVALID_SOCKET;
             continue;
         }
+        memcpy(&game->clientId, buf + 9, 2);
 
         /* Make the socket non blocking */
         mode = 1;
