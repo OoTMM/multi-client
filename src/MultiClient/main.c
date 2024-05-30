@@ -25,7 +25,12 @@ int main(int argc, char** argv)
 
     if (appInit(&app))
         return 1;
-    if (appListen(&app, "localhost", 13249))
+    if (appStartPj64(&app, "localhost", 13249))
+    {
+        appQuit(&app);
+        return 1;
+    }
+    if (appStartAres(&app, "localhost", 9123))
     {
         appQuit(&app);
         return 1;

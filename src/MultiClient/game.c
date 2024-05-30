@@ -42,7 +42,7 @@ static void gameServerReconnect(Game* game)
     game->state = STATE_CONNECT;
 }
 
-void gameInit(Game* game, SOCKET sock)
+void gameInit(Game* game, SOCKET sock, int apiProtocol)
 {
     /* Set initial values */
     game->valid = 1;
@@ -51,8 +51,10 @@ void gameInit(Game* game, SOCKET sock)
     game->nopAcc = 0;
     game->timeout = 0;
     game->apiError = 0;
+    game->apiProtocol = apiProtocol;
     game->socketApi = sock;
     game->socketServer = INVALID_SOCKET;
+    protocolInit(game);
 
     netBufInit(&game->tx);
 

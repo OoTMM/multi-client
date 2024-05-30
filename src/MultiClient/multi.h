@@ -8,17 +8,26 @@
     #include <ws2tcpip.h>
     #include <windows.h>
 
+    static inline char *strerror(int err)
+    {
+        static char buf[256];
+        FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, 0, buf, sizeof(buf), NULL);
+        return buf;
+    }
+
     static inline int sockasync(SOCKET sock, int enable)
     {
         u_long mode = enable ? 1 : 0;
         return ioctlsocket(sock, FIONBIO, &mode);
     }
+
 #else
     typedef int SOCKET;
     #include <unistd.h>
     #include <sys/socket.h>
     #include <sys/types.h>
     #include <sys/stat.h>
+    #include <arpa/inet.h>
     #include <netdb.h>
     #include <fcntl.h>
     #include <errno.h>
@@ -61,6 +70,9 @@
 
 #define MAX_GAMES   8
 #define VERSION     0x00000200
+
+#define PROTOCOL_PJ64   0x01
+#define PROTOCOL_ARES   0x02
 
 #define STATE_INIT      0x00
 #define STATE_CONNECT   0x01
@@ -120,6 +132,7 @@ typedef struct
     unsigned    nopAcc;
     unsigned    timeout;
     int         apiError;
+    int         apiProtocol;
 
     SOCKET      socketApi;
     SOCKET      socketServer;
@@ -148,19 +161,22 @@ typedef struct
 {
     const char* serverHost;
     uint16_t    serverPort;
-    SOCKET      socket;
+    SOCKET      socketPj64;
+    SOCKET      socketAres;
     Game        games[MAX_GAMES];
 }
 App;
 
 int appInit(App* app);
-int appListen(App* app, const char* host, uint16_t port);
+int appStartPj64(App* app, const char* host, uint16_t port);
+int appStartAres(App* app, const char* host, uint16_t port);
 int appRun(App* app, const char* host, uint16_t port);
 int appQuit(App* app);
 
-void gameInit(Game* g, SOCKET s);
+void gameInit(Game* g, SOCKET s, int apiProtocol);
 void gameTick(App* app, Game* game);
 
+void        protocolInit(Game* game);
 uint8_t     protocolRead8(Game* game, uint32_t addr);
 uint16_t    protocolRead16(Game* game, uint32_t addr);
 uint32_t    protocolRead32(Game* game, uint32_t addr);

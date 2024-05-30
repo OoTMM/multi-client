@@ -12,14 +12,15 @@ int appInit(App* app)
         return 1;
     }
 
-    app->socket = INVALID_SOCKET;
+    app->socketPj64 = INVALID_SOCKET;
+    app->socketAres = INVALID_SOCKET;
     for (int i = 0; i < MAX_GAMES; ++i)
         app->games[i].valid = 0;
 
     return 0;
 }
 
-int appListen(App* app, const char* host, uint16_t port)
+int appStartPj64(App* app, const char* host, uint16_t port)
 {
     SOCKET sock;
     struct addrinfo hints;
@@ -82,24 +83,79 @@ int appListen(App* app, const char* host, uint16_t port)
         return 1;
     }
 
-    app->socket = sock;
-    printf("Listening to %s:%d\n", host, port);
+    app->socketPj64 = sock;
     return 0;
 }
 
-static void appAccept(App* app)
+int appStartAres(App* app, const char* host, uint16_t port)
 {
+    int ret;
     SOCKET sock;
-    u_long mode;
+    struct addrinfo hints;
+    struct addrinfo* result;
+    struct addrinfo* ptr;
+    char buf[16];
 
-    /* Accept the connection */
-    sock = accept(app->socket, NULL, NULL);
-    if (sock == INVALID_SOCKET)
-        return;
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) {
+        fprintf(stderr, "Unable to create socket\n");
+        return 1;
+    }
 
-    /* Make the socket blocking */
-    sockasync(sock, 0);
+    /* Set the socket to non-blocking */
+    ret = sockasync(sock, 1);
 
+    if (ret == SOCKET_ERROR)
+    {
+        fprintf(stderr, "Unable to set socket to non-blocking\n");
+        closesocket(sock);
+        return 1;
+    }
+
+    /* Resolve the host and port */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family     = AF_UNSPEC;
+    hints.ai_socktype   = SOCK_STREAM;
+    hints.ai_protocol   = IPPROTO_TCP;
+
+    sprintf(buf, "%d", port);
+    ret = getaddrinfo(host, buf, &hints, &result);
+    if (ret != 0)
+    {
+        fprintf(stderr, "Unable to resolve %s:%d: %s\n", host, port, strerror(WSAGetLastError()));
+        closesocket(sock);
+        return 1;
+    }
+
+    if (result == NULL) {
+        fprintf(stderr, "Unable to resolve to %s:%d\n", host, port);
+        closesocket(sock);
+        return 1;
+    }
+
+    /* Connect to the server */
+    for (ptr = result; ptr != NULL; ptr = ptr->ai_next)
+    {
+        ret = connect(sock, ptr->ai_addr, (int)ptr->ai_addrlen);
+        // printf("[ares] connect: %d %d %s %p\n", ret, WSAGetLastError(), strerror(WSAGetLastError()), ptr);
+        if (ret == 0 || (ret == SOCKET_ERROR && WSAGetLastError() == WSAEINPROGRESS)) {
+            // printf("ok\n");
+            break;
+        }
+    }
+
+    if (ptr == NULL) {
+        fprintf(stderr, "Unable to connect to %s:%d\n", host, port);
+        closesocket(sock);
+        return 1;
+    }
+
+    app->socketAres = sock;
+    return 0;
+}
+
+static void appGameInit(App* app, SOCKET sock, int apiProtocol)
+{
     /* Create game */
     for (int i = 0; i < MAX_GAMES; ++i)
     {
@@ -108,7 +164,7 @@ static void appAccept(App* app)
         g = &app->games[i];
         if (g->valid)
             continue;
-        gameInit(g, sock);
+        gameInit(g, sock, apiProtocol);
         return;
     }
 
@@ -116,8 +172,10 @@ static void appAccept(App* app)
     closesocket(sock);
 }
 
-static void appTryAccept(App* app)
+static void appCheckPj64(App* app)
 {
+    SOCKET sock;
+    u_long mode;
     fd_set readfds;
     int ret;
     TIMEVAL timeout;
@@ -126,18 +184,76 @@ static void appTryAccept(App* app)
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
 
-    for (;;)
-    {
-        /* Setup the selector */
-        FD_ZERO(&readfds);
-        FD_SET(app->socket, &readfds);
+    /* Setup the selector */
+    FD_ZERO(&readfds);
+    FD_SET(app->socketPj64, &readfds);
 
-        /* Select */
-        ret = select(0, &readfds, NULL, NULL, &timeout);
-        if (ret < 1)
-            break;
-        appAccept(app);
+    /* Select */
+    ret = select(app->socketPj64+1, &readfds, NULL, NULL, &timeout);
+    if (ret < 1)
+        return;
+
+
+    /* Accept the connection */
+    sock = accept(app->socketPj64, NULL, NULL);
+    if (sock == INVALID_SOCKET)
+        return;
+
+    /* Make the socket blocking */
+    sockasync(sock, 0);
+
+    appGameInit(app, sock, PROTOCOL_PJ64);
+}
+
+static void appCheckAres(App* app)
+{
+    fd_set writefds;
+    int ret;
+    int error; unsigned len;
+    TIMEVAL timeout;
+    SOCKET sock;
+    u_long mode;
+
+    if (app->socketAres == INVALID_SOCKET) {
+        appStartAres(app, "localhost", 9123);
+        if (app->socketAres == INVALID_SOCKET)
+            return;
     }
+
+    /* Setup the timeout */
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0;
+
+    /* Setup the selector */
+    FD_ZERO(&writefds);
+    FD_SET(app->socketAres, &writefds);
+
+    /* Select */
+    ret = select(app->socketAres+1, NULL, &writefds, NULL, &timeout);
+    if (ret < 1)
+        return;
+
+    error = 0;
+    len = sizeof(error);
+    if (getsockopt(app->socketAres, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {        
+        closesocket(app->socketAres);
+        app->socketAres = INVALID_SOCKET;
+        return;
+    }
+
+    /* Make the socket blocking */
+    sock = app->socketAres;
+    app->socketAres = INVALID_SOCKET;
+
+#ifdef _WIN32
+    mode = 0;
+    ioctlsocket(sock, FIONBIO, &mode);
+#else
+    mode = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, mode & ~O_NONBLOCK);
+#endif
+
+    appGameInit(app, sock, PROTOCOL_ARES);
 }
 
 static sig_atomic_t sSignaled = 0;
@@ -162,7 +278,8 @@ int appRun(App* app, const char *host, uint16_t port)
     {
         if (sSignaled)
             break;
-        appTryAccept(app);
+        appCheckPj64(app);
+        appCheckAres(app);
         for (int i = 0; i < MAX_GAMES; ++i)
         {
             Game* g;
@@ -180,10 +297,15 @@ int appRun(App* app, const char *host, uint16_t port)
 int appQuit(App* app)
 {
     /* Close the socket */
-    if (app->socket != INVALID_SOCKET)
+    if (app->socketPj64 != INVALID_SOCKET)
     {
-        closesocket(app->socket);
-        app->socket = INVALID_SOCKET;
+        closesocket(app->socketPj64);
+        app->socketPj64 = INVALID_SOCKET;
+    }
+    if (app->socketAres != INVALID_SOCKET)
+    {
+        closesocket(app->socketAres);
+        app->socketAres = INVALID_SOCKET;
     }
 
     /* Cleanup WS2 */
