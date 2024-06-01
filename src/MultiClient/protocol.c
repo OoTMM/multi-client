@@ -161,7 +161,7 @@ static int aresCommandWrite(Game* game, uint32_t addr, int size, uint32_t value)
 
 static uint32_t aresRead(Game* game, uint32_t addr, int size)
 {
-    printf("aresRead(%08x, %d)\n", addr, size);
+    LOGF("aresRead(%08x, %d)\n", addr, size);
     uint32_t value;
     if (!aresCommandRead(game, addr, size, &value))
     {
@@ -176,7 +176,7 @@ static uint32_t aresRead(Game* game, uint32_t addr, int size)
 
 static void aresWrite(Game* game, uint32_t addr, uint32_t value, int size)
 {
-    printf("aresWrite(%08x, %08x, %d)\n", addr, value, size);
+    LOGF("aresWrite(%08x, %08x, %d)\n", addr, value, size);
     if (!aresCommandWrite(game, addr, size, value))
     {
         game->apiError = 1;

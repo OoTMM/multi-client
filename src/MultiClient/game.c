@@ -593,9 +593,10 @@ static void gameServerTick(App* app, Game* game)
 
 void gameTick(App* app, Game* game)
 {
+    LOGF("Game tick\n");
     if (apiContextLock(game))
     {
-        printf("Game API tick\n");
+        LOGF("Game API tick\n");
         gameApiTick(game);
         apiContextUnlock(game);
     }
@@ -605,4 +606,5 @@ void gameTick(App* app, Game* game)
         printf("Game disconnected\n");
         gameClose(game);
     }
+    LOGF("Game tick end\n");
 }

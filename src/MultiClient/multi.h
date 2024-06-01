@@ -7,6 +7,8 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <windows.h>
+    #include <stdio.h>
+    #include <stdarg.h>
 
     static inline char *strerror(int err)
     {
@@ -21,16 +23,32 @@
         return ioctlsocket(sock, FIONBIO, &mode);
     }
 
+    static inline void LOGF(const char* fmt, ...)
+    {
+        FILETIME ft;
+        GetSystemTimePreciseAsFileTime(&ft);
+        SYSTEMTIME st;
+        FileTimeToSystemTime(&ft, &st);
+        printf("[%02d:%02d:%02d.%03d] ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+        va_list args;
+        va_start(args, fmt);
+        vprintf(fmt, args);
+        va_end(args);
+    }
 #else
     typedef int SOCKET;
     #include <unistd.h>
     #include <sys/socket.h>
     #include <sys/types.h>
     #include <sys/stat.h>
+    #include <sys/time.h>
     #include <arpa/inet.h>
     #include <netdb.h>
     #include <fcntl.h>
     #include <errno.h>
+    #include <stdio.h>
+    #include <stdarg.h>
+    #include <time.h>
 
     #define INVALID_SOCKET          (-1)
     #define SOCKET_ERROR            (-1)
@@ -60,6 +78,19 @@
         else
             mode &= ~O_NONBLOCK;
         return fcntl(sock, F_SETFL, mode);
+    }
+
+    static inline void LOGF(const char* fmt, ...)
+    {
+        // print timestamp in milliseconds
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        struct tm* tm = localtime(&tv.tv_sec);
+        printf("[%02d:%02d:%02d.%03d] ", tm->tm_hour, tm->tm_min, tm->tm_sec, (int)(tv.tv_usec / 1000));
+        va_list args;
+        va_start(args, fmt);
+        vprintf(fmt, args);
+        va_end(args);
     }
 #endif
 
