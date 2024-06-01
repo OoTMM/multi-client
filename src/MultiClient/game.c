@@ -595,6 +595,7 @@ void gameTick(App* app, Game* game)
 {
     if (apiContextLock(game))
     {
+        printf("Game API tick\n");
         gameApiTick(game);
         apiContextUnlock(game);
     }

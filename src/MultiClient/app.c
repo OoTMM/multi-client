@@ -137,9 +137,9 @@ int appStartAres(App* app, const char* host, uint16_t port)
     for (ptr = result; ptr != NULL; ptr = ptr->ai_next)
     {
         ret = connect(sock, ptr->ai_addr, (int)ptr->ai_addrlen);
-        printf("[ares] connect: %d %d %s %p\n", ret, WSAGetLastError(), strerror(WSAGetLastError()), ptr);
+        // printf("[ares] connect: %d %d %s %p\n", ret, WSAGetLastError(), strerror(WSAGetLastError()), ptr);
         if (ret == 0 || (ret == SOCKET_ERROR && (WSAGetLastError() == WSAEINPROGRESS || WSAGetLastError() == WSAEWOULDBLOCK))) {
-            printf("[ares] connection in progress...\n");
+            // printf("[ares] connection in progress...\n");
             break;
         }
     }
@@ -233,11 +233,11 @@ static void appCheckAres(App* app)
     if (ret < 1)
         return;
 
-    printf("[ares] connection completed\n");
+    // printf("[ares] connection completed\n");
     error = 0;
     len = sizeof(error);
     if (getsockopt(app->socketAres, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {        
-        fprintf(stderr, "[ares] connection failed: %d %s\n", error, strerror(error));
+        // fprintf(stderr, "[ares] connection failed: %d %s\n", error, strerror(error));
         closesocket(app->socketAres);
         app->socketAres = INVALID_SOCKET;
         return;
