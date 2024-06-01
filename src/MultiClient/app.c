@@ -138,7 +138,7 @@ int appStartAres(App* app, const char* host, uint16_t port)
     {
         ret = connect(sock, ptr->ai_addr, (int)ptr->ai_addrlen);
         printf("[ares] connect: %d %d %s %p\n", ret, WSAGetLastError(), strerror(WSAGetLastError()), ptr);
-        if (ret == 0 || (ret == SOCKET_ERROR && WSAGetLastError() == WSAEINPROGRESS)) {
+        if (ret == 0 || (ret == SOCKET_ERROR && (WSAGetLastError() == WSAEINPROGRESS || WSAGetLastError() == WSAEWOULDBLOCK))) {
             printf("[ares] connection in progress...\n");
             break;
         }
