@@ -211,6 +211,7 @@ void        protocolInit(Game* game);
 uint8_t     protocolRead8(Game* game, uint32_t addr);
 uint16_t    protocolRead16(Game* game, uint32_t addr);
 uint32_t    protocolRead32(Game* game, uint32_t addr);
+void        protocolReadBuffer(Game *game, uint32_t addr, int count, uint8_t *buffer);
 void        protocolWrite8(Game* game, uint32_t addr, uint8_t value);
 void        protocolWrite16(Game* game, uint32_t addr, uint16_t value);
 void        protocolWrite32(Game* game, uint32_t addr, uint32_t value);
