@@ -103,7 +103,7 @@ static int aresCommandRead(Game* game, uint32_t addr, int count, uint8_t *value)
     LOGF("aresRead(%08x, %d)\n", addr, count);
     printf("    => ");
 
-    char buf[32];
+    char buf[256];
     sprintf(buf, "m%08x,%x", addr, count);
     for (int i = 0; buf[i] != 0; ++i)
         checksum += buf[i];
