@@ -291,7 +291,7 @@ int appRun(App* app, const char *host, uint16_t port)
                 continue;
             gameTick(app, g);
         }
-        Sleep(10);
+        Sleep(100);
     }
     return 0;
 }
