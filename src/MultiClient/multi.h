@@ -1,6 +1,8 @@
 #ifndef MULTI_H
 #define MULTI_H
 
+#define LOG_DEBUG    0
+
 #ifdef _WIN32
     #define _WIN32_LEAN_AND_MEAN 1
     #define _CRT_SECURE_NO_WARNINGS 1
@@ -25,6 +27,7 @@
 
     static inline void LOGF(const char* fmt, ...)
     {
+        #if LOG_DEBUG
         FILETIME ft;
         GetSystemTimePreciseAsFileTime(&ft);
         SYSTEMTIME st;
@@ -34,6 +37,7 @@
         va_start(args, fmt);
         vprintf(fmt, args);
         va_end(args);
+        #endif
     }
 #else
     typedef int SOCKET;
@@ -82,7 +86,7 @@
 
     static inline void LOGF(const char* fmt, ...)
     {
-        // print timestamp in milliseconds
+        #if LOG_DEBUG
         struct timeval tv;
         gettimeofday(&tv, NULL);
         struct tm* tm = localtime(&tv.tv_sec);
@@ -91,6 +95,7 @@
         va_start(args, fmt);
         vprintf(fmt, args);
         va_end(args);
+        #endif
     }
 #endif
 
