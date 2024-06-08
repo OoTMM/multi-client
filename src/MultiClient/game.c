@@ -42,7 +42,7 @@ static void gameServerReconnect(Game* game)
     game->state = STATE_CONNECT;
 }
 
-void gameInit(Game* game, SOCKET sock)
+void gameInit(Game* game, SOCKET sock, int apiProtocol)
 {
     /* Set initial values */
     game->valid = 1;
@@ -51,8 +51,10 @@ void gameInit(Game* game, SOCKET sock)
     game->nopAcc = 0;
     game->timeout = 0;
     game->apiError = 0;
+    game->apiProtocol = apiProtocol;
     game->socketApi = sock;
     game->socketServer = INVALID_SOCKET;
+    protocolInit(game);
 
     netBufInit(&game->tx);
 
@@ -81,8 +83,7 @@ static void gameLoadApiData(Game* game)
     uint32_t uuidAddr;
 
     uuidAddr = protocolRead32(game, game->apiNetAddr + 0x00);
-    for (int i = 0; i < 16; ++i)
-        game->uuid[i] = protocolRead8(game, uuidAddr + i);
+    protocolReadBuffer(game, uuidAddr, 16, game->uuid);
 
     if (!game->apiError)
     {
@@ -160,14 +161,16 @@ static void gameApiItemOut(Game* game)
     uint32_t key;
     uint16_t gi;
     uint16_t flags;
+    uint8_t buffer[16];
 
     itemBase = game->apiNetAddr + 0x0c;
-    playerFrom = protocolRead8(game, itemBase + 0x00);
-    playerTo = protocolRead8(game, itemBase + 0x01);
-    gameId = protocolRead8(game, itemBase + 0x02);
-    key = protocolRead32(game, itemBase + 0x04);
-    gi = protocolRead16(game, itemBase + 0x08);
-    flags = protocolRead16(game, itemBase + 0x0a);
+    protocolReadBuffer(game, itemBase, 16, buffer);
+    playerFrom = buffer[0];
+    playerTo = buffer[1];
+    gameId = buffer[2];
+    key = (buffer[4] << 24) | (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
+    gi = (buffer[8] << 8) | buffer[9];
+    flags = (buffer[10] << 8) | buffer[11];
 
     if (game->apiError)
         return;
@@ -217,12 +220,14 @@ static int insertMessage(Game* game, NetMsg* msg)
 {
     uint8_t size;
     int index;
+    uint8_t sizes[32];
+
+    protocolReadBuffer(game, game->apiNetAddr + 0x28, 32, sizes);
 
     index = -1;
     for (int i = 0; i < 32; ++i)
     {
-        size = protocolRead8(game, game->apiNetAddr + 0x28 + i);
-        if (size == 0)
+        if (sizes[i] == 0)
         {
             index = i;
             break;
@@ -254,18 +259,20 @@ static void gameApiProcessMessagesIn(Game* game)
 
 static void gameApiProcessMessagesOut(Game* game)
 {
-    char data[34];
+    uint8_t data[34];
     uint8_t size;
+    uint8_t sizes[32];
+
+    protocolReadBuffer(game, game->apiNetAddr + 0x48, 32, sizes);
 
     for (int i = 0; i < 32; ++i)
     {
-        size = protocolRead8(game, game->apiNetAddr + 0x48 + i);
+        size = sizes[i];
         if (size)
         {
             data[0] = OP_MSG;
             data[1] = size;
-            for (int j = 0; j < size; ++j)
-                data[j + 2] = protocolRead8(game, game->apiNetAddr + 0xa8 + i * 32 + j);
+            protocolReadBuffer(game, game->apiNetAddr + 0xa8 + i * 32, size, &data[2]);
 
             /* Send */
             netBufAppend(&game->tx, data, size + 2);
@@ -498,8 +505,7 @@ static void gameServerConnect(App* app, Game* game)
         }
 
         /* Make the socket blocking */
-        mode = 0;
-        ioctlsocket(game->socketServer, FIONBIO, &mode);
+        sockasync(game->socketServer, 0);
 
         /* Send the initial message */
         memcpy(buf, "OOMM2", 5);
@@ -528,8 +534,7 @@ static void gameServerConnect(App* app, Game* game)
         memcpy(&game->clientId, buf + 9, 2);
 
         /* Make the socket non blocking */
-        mode = 1;
-        ioctlsocket(game->socketServer, FIONBIO, &mode);
+        sockasync(game->socketServer, 1);
 
         break;
     }
@@ -593,8 +598,10 @@ static void gameServerTick(App* app, Game* game)
 
 void gameTick(App* app, Game* game)
 {
+    LOGF("Game tick\n");
     if (apiContextLock(game))
     {
+        LOGF("Game API tick\n");
         gameApiTick(game);
         apiContextUnlock(game);
     }
@@ -604,4 +611,5 @@ void gameTick(App* app, Game* game)
         printf("Game disconnected\n");
         gameClose(game);
     }
+    LOGF("Game tick end\n");
 }
