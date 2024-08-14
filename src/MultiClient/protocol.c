@@ -140,21 +140,27 @@ static int aresCommandRead(Game* game, uint32_t addr, int count, uint8_t *value)
     return 1;
 }
 
-static int aresCommandWrite(Game* game, uint32_t addr, int size, uint32_t value)
+static int aresCommandWrite(Game* game, uint32_t addr, int size, uint8_t *value)
 {
     int read;
     int error = 0;
     uint8_t checksum = 0;
 
-    char buf[32];
-    sprintf(buf, "M%08x,%x:%0*X", addr, size, size*2, value);
-    for (int i = 0; buf[i] != 0; ++i)
-        checksum += buf[i];
+    char buf[64];
 
     error |= !sockSend(game->socketApi, "$", 1);
-    error |= !sockSend(game->socketApi, buf, strlen(buf));
+    sprintf(buf, "M%08x,%x:", addr, size);
+    for (int i = 0; buf[i] != 0; ++i)
+        checksum += buf[i];
+    error |= !sockSend(game->socketApi, buf, strlen(buf));  
+    for (int i = 0; i < size; i ++) {
+        sprintf(buf, "%02x", value[i]);
+        error |= !sockSend(game->socketApi, buf, strlen(buf));
+        checksum += buf[i];
+    }
     sprintf(buf, "#%02x", checksum);
     error |= !sockSend(game->socketApi, buf, strlen(buf));
+    
     if (error)
         return 0;
 
@@ -196,10 +202,15 @@ static uint32_t aresReadInt(Game* game, uint32_t addr, int size)
     return value;
 }
 
-static void aresWrite(Game* game, uint32_t addr, uint32_t value, int size)
+static void aresWriteInt(Game* game, uint32_t addr, uint32_t value, int size)
 {
-    LOGF("aresWrite(%08x, %08x, %d)\n", addr, value, size);
-    if (!aresCommandWrite(game, addr, size, value))
+    LOGF("aresWriteInt(%08x, %08x, %d)\n", addr, value, size);
+
+    char buf[4];
+    for (int i = 0; i < size; i ++)
+        buf[size - 1 - i] = (value >> (8*i)) & 0xff;
+
+    if (!aresCommandWrite(game, addr, size, buf))
     {
         game->apiError = 1;
         closesocket(game->socketApi);
@@ -270,7 +281,7 @@ void protocolWrite8(Game* game, uint32_t addr, uint8_t value)
         pj64Write(game, &value, 6, 1, addr);
         break;
     case PROTOCOL_ARES:
-        aresWrite(game, addr, value, 1);
+        aresWriteInt(game, addr, value, 1);
         break;
     }
 }
@@ -282,7 +293,7 @@ void protocolWrite16(Game* game, uint32_t addr, uint16_t value)
         pj64Write(game, &value, 7, 2, addr);
         break;
     case PROTOCOL_ARES:
-        aresWrite(game, addr, value, 2);
+        aresWriteInt(game, addr, value, 2);
         break;
     }
 }
@@ -294,7 +305,7 @@ void protocolWrite32(Game* game, uint32_t addr, uint32_t value)
         pj64Write(game, &value, 8, 4, addr);
         break;
     case PROTOCOL_ARES:
-        aresWrite(game, addr, value, 4);
+        aresWriteInt(game, addr, value, 4);
         break;
     }
 }
