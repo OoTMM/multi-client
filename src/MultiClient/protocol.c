@@ -310,6 +310,19 @@ void protocolWrite32(Game* game, uint32_t addr, uint32_t value)
     }
 }
 
+void protocolWriteBuffer(Game* game, uint32_t addr, int count, uint8_t *buffer)
+{
+    switch (game->apiProtocol) {
+    case PROTOCOL_PJ64:
+        for (int i = 0; i < count; i ++) 
+            protocolWrite8(game, addr+i, buffer[i]);
+        break;
+    case PROTOCOL_ARES:
+        aresCommandWrite(game, addr, count, buffer);
+        break;
+    }
+}
+
 void protocolInit(Game* game)
 {
     switch (game->apiProtocol) {
