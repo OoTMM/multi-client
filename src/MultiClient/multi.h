@@ -48,6 +48,7 @@
     #include <sys/time.h>
     #include <arpa/inet.h>
     #include <netdb.h>
+    #include <netinet/tcp.h>
     #include <fcntl.h>
     #include <errno.h>
     #include <stdio.h>
