@@ -100,8 +100,7 @@ static int aresCommandRead(Game* game, uint32_t addr, int count, uint8_t *value)
     int error = 0;
     uint8_t checksum = 0;
 
-    LOGF("aresRead(%08x, %d)\n", addr, count);
-    printf("    => ");
+    LOGF("aresRead(%08x, %d)\n    => ", addr, count);
 
     char buf[256];
     sprintf(buf, "m%08x,%x", addr, count);
@@ -128,9 +127,9 @@ static int aresCommandRead(Game* game, uint32_t addr, int count, uint8_t *value)
         return 0;
     for (int i=0; i<count; i++) {
         *value++ = (unhex(buf[1+i*2]) << 4) | unhex(buf[1+i*2+1]);
-        printf("%02x", value[-1]);
+        if (LOG_DEBUG) printf("%02x", value[-1]);
     }
-    printf("\n");
+    if (LOG_DEBUG) printf("\n");
 
     if (buf[1+count*2] != '#')
         return 0;
@@ -160,7 +159,7 @@ static int aresCommandWrite(Game* game, uint32_t addr, int size, uint8_t *value)
     }
     sprintf(buf, "#%02x", checksum);
     error |= !sockSend(game->socketApi, buf, strlen(buf));
-    
+
     if (error)
         return 0;
 
