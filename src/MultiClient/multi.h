@@ -48,6 +48,7 @@
     #include <sys/time.h>
     #include <arpa/inet.h>
     #include <netdb.h>
+    #include <netinet/tcp.h>
     #include <fcntl.h>
     #include <errno.h>
     #include <stdio.h>
@@ -220,6 +221,7 @@ void        protocolReadBuffer(Game *game, uint32_t addr, int count, uint8_t *bu
 void        protocolWrite8(Game* game, uint32_t addr, uint8_t value);
 void        protocolWrite16(Game* game, uint32_t addr, uint16_t value);
 void        protocolWrite32(Game* game, uint32_t addr, uint32_t value);
+void        protocolWriteBuffer(Game* game, uint32_t addr, int count, uint8_t *value);
 
 int         apiContextLock(Game* game);
 void        apiContextUnlock(Game* game);

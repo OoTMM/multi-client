@@ -133,6 +133,10 @@ int appStartAres(App* app, const char* host, uint16_t port)
         return 1;
     }
 
+    /* Set TCP_NODELAY / disable Nagle algorithm, we need very low latency during an API tick */
+    int tcpNodelayOption = 1;
+    ret = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *)&tcpNodelayOption, sizeof(int));
+
     /* Connect to the server */
     for (ptr = result; ptr != NULL; ptr = ptr->ai_next)
     {
