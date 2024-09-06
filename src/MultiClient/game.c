@@ -115,6 +115,10 @@ static uint64_t crc64(const void* data, size_t size)
     return crc;
 }
 
+static void memcpy_rev(uint8_t* dest, uint8_t *src, size_t n) {
+    for (int i = 0; i < n; i++) dest[n - 1 - i] = src[i];
+}
+
 static uint64_t itemKey(uint32_t checkKey, uint8_t gameId, uint8_t playerFrom, uint32_t entriesCount)
 {
     char buffer[0x10];
@@ -188,8 +192,7 @@ static void gameApiApplyLedger(Game* game)
 {
     uint32_t entryId;
     uint32_t cmdBase;
-    uint16_t tmp16;
-    uint32_t tmp32;
+    uint8_t tmp[8];
     LedgerFullEntry* fe;
 
     entryId = protocolRead32(game, game->apiNetAddr + 0x04);
@@ -205,15 +208,14 @@ static void gameApiApplyLedger(Game* game)
     fe = game->entries + entryId;
     protocolWrite8(game, game->apiNetAddr + 0x18, 0x01);
     cmdBase = game->apiNetAddr + 0x1c;
-    protocolWrite8(game, cmdBase + 0x00, fe->data[0x00]); // playerFrom
-    protocolWrite8(game, cmdBase + 0x01, fe->data[0x01]); // playerTo
-    protocolWrite8(game, cmdBase + 0x02, fe->data[0x02]); // gameId
-    memcpy(&tmp32, fe->data + 0x04, 4);
-    protocolWrite32(game, cmdBase + 0x04, tmp32); // key
-    memcpy(&tmp16, fe->data + 0x08, 2);
-    protocolWrite16(game, cmdBase + 0x08, tmp16); // gi
-    memcpy(&tmp16, fe->data + 0x0a, 2);
-    protocolWrite16(game, cmdBase + 0x0a, tmp16); // flags
+
+    // uint8_t playerFrom, playerTo, gameId
+    protocolWriteBuffer(game, cmdBase + 0x00, 3, fe->data);
+
+    memcpy_rev(tmp + 0x00, fe->data + 0x04, 4); // uint32_t key
+    memcpy_rev(tmp + 0x04, fe->data + 0x08, 2); // uint16_t gi
+    memcpy_rev(tmp + 0x06, fe->data + 0x0a, 2); // uint16_t flags
+    protocolWriteBuffer(game, cmdBase + 0x04, 8, tmp);
 }
 
 static int insertMessage(Game* game, NetMsg* msg)
@@ -237,10 +239,10 @@ static int insertMessage(Game* game, NetMsg* msg)
     if (index < 0)
         return -1;
 
+    
     protocolWrite8(game, game->apiNetAddr + 0x28 + index, msg->size);
     protocolWrite16(game, game->apiNetAddr + 0x68 + index * 2, msg->clientId);
-    for (int i = 0; i < msg->size; ++i)
-        protocolWrite8(game, game->apiNetAddr + 0xa8 + index * 32 + i, msg->data[i]);
+    if (msg->size > 0) protocolWriteBuffer(game, game->apiNetAddr + 0xa8 + index * 32, msg->size, msg->data);
     return 0;
 }
 
